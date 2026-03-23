@@ -1,0 +1,17 @@
+{
+  "name": "@bookai/scheduling",
+  "version": "0.0.0",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@bookai/db": "*",
+    "@bookai/utils": "*",
+    "@bookai/types": "*",
+    "date-fns": "^4.1.0",
+    "date-fns-tz": "^3.2.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
+}
