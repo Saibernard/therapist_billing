@@ -1,0 +1,1033 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// ORGANIZATIONS (tenants)
+// ============================================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  timezone  String   @default("America/New_York")
+  currency  String   @default("USD")
+  locale    String   @default("en")
+  address   String?
+  latitude  Float?
+  longitude Float?
+  category  String?
+  phone     String?
+  email     String?
+  website   String?
+  settings  String   @default("{}")
+  onboardingCompleted Boolean @default(false)
+
+  stripeCustomerId  String? @unique
+  stripeConnectId   String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users            User[]
+  clients          Client[]
+  services         Service[]
+  staffMembers     StaffMember[]
+  appointments     Appointment[]
+  communicationLogs CommunicationLog[]
+  messageTemplates MessageTemplate[]
+  aiConversations  AiConversation[]
+  payments         Payment[]
+  bookingPage      BookingPage?
+  subscription     Subscription?
+  aiActionLogs     AiActionLog[]
+  waitlistEntries  WaitlistEntry[]
+  reviews          Review[]
+  importJobs       ImportJob[]
+  recurrenceRules  RecurrenceRule[]
+  packages         Package[]
+  clientPackages   ClientPackage[]
+  intakeForms      IntakeForm[]
+  intakeFormSubmissions IntakeFormSubmission[]
+  calendarSyncs    CalendarSync[]
+  campaigns        Campaign[]
+  locations        Location[]
+
+  @@map("organizations")
+}
+
+// ============================================================
+// LOCATIONS (multi-location support)
+// ============================================================
+
+model Location {
+  id              String  @id @default(cuid())
+  organizationId  String
+  name            String
+  address         String?
+  city            String?
+  state           String?
+  zipCode         String?
+  phone           String?
+  email           String?
+  latitude        Float?
+  longitude       Float?
+  timezone        String?
+  isActive        Boolean @default(true)
+  isPrimary       Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffMemberLocations StaffMemberLocation[]
+  appointments       Appointment[]
+
+  @@index([organizationId])
+  @@map("locations")
+}
+
+model StaffMemberLocation {
+  id            String @id @default(cuid())
+  staffMemberId String
+  locationId    String
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  location    Location    @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([staffMemberId, locationId])
+  @@map("staff_member_locations")
+}
+
+// ============================================================
+// USERS (business owners + staff -- NOT clients)
+// ============================================================
+
+enum UserRole {
+  OWNER
+  ADMIN
+  STAFF
+}
+
+model User {
+  id             String   @id @default(cuid())
+  organizationId String
+  email          String   @unique
+  name           String
+  avatarUrl      String?
+  role           UserRole @default(STAFF)
+  phone          String?
+  emailVerified  DateTime?
+  passwordHash   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffMember  StaffMember?
+  accounts     Account[]
+  sessions     Session[]
+  calendarSyncs CalendarSync[]
+
+  @@index([organizationId])
+  @@map("users")
+}
+
+// ============================================================
+// AUTH.JS MODELS
+// ============================================================
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// CLIENTS (contacts -- no auth, identified by phone/email)
+// ============================================================
+
+enum ContactChannel {
+  EMAIL
+  SMS
+  WHATSAPP
+}
+
+enum ClientSource {
+  BOOKING_PAGE
+  AI
+  MANUAL
+  IMPORT
+  WALK_IN
+}
+
+model Client {
+  id              String   @id @default(cuid())
+  organizationId  String
+  email           String?
+  firstName       String
+  lastName        String?
+  phone           String?
+  notes           String?
+  tags            String   @default("[]")
+  preferredChannel ContactChannel @default(EMAIL)
+  totalVisits     Int      @default(0)
+  totalSpent      Decimal  @default(0)
+  lastVisitAt     DateTime?
+  noShowCount     Int      @default(0)
+  source          ClientSource @default(MANUAL)
+  stripeCustomerId String?  @unique
+  hasCardOnFile    Boolean  @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  appointments      Appointment[]
+  communicationLogs CommunicationLog[]
+  aiConversations   AiConversation[]
+  payments          Payment[]
+  waitlistEntries   WaitlistEntry[]
+  reviews           Review[]
+  recurrenceRules   RecurrenceRule[]
+  clientPackages    ClientPackage[]
+  intakeFormSubmissions IntakeFormSubmission[]
+  campaignExecutions   CampaignExecution[]
+
+  @@unique([organizationId, email])
+  @@unique([organizationId, phone])
+  @@index([organizationId])
+  @@map("clients")
+}
+
+// ============================================================
+// SERVICES
+// ============================================================
+
+model Service {
+  id              String  @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  category        String?
+  durationMinutes Int
+  bufferMinutes   Int     @default(0)
+  price           Decimal
+  currency        String  @default("USD")
+  color           String  @default("#3B82F6")
+  maxCapacity     Int     @default(1)
+  isActive        Boolean @default(true)
+  sortOrder       Int     @default(0)
+  depositAmount   Decimal?
+  depositType     String?  // "fixed" or "percentage"
+  noShowFeeAmount Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  staffServices   StaffService[]
+  appointments    Appointment[]
+  waitlistEntries WaitlistEntry[]
+  recurrenceRules RecurrenceRule[]
+  intakeFormLinks IntakeFormServiceLink[]
+
+  @@index([organizationId])
+  @@map("services")
+}
+
+// ============================================================
+// STAFF
+// ============================================================
+
+model StaffMember {
+  id             String  @id @default(cuid())
+  organizationId String
+  userId         String? @unique
+  displayName    String
+  bio            String?
+  avatarUrl      String?
+  isActive       Boolean @default(true)
+  commissionRate Decimal? // percentage or flat amount
+  commissionType String?  // "percentage" or "flat"
+  hourlyRate     Decimal?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization      Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user              User?                 @relation(fields: [userId], references: [id])
+  staffServices     StaffService[]
+  schedules         StaffSchedule[]
+  scheduleOverrides StaffScheduleOverride[]
+  appointments      Appointment[]
+  waitlistEntries   WaitlistEntry[]
+  recurrenceRules   RecurrenceRule[]
+  calendarSyncs     CalendarSync[]
+  staffMemberLocations StaffMemberLocation[]
+
+  @@index([organizationId])
+  @@map("staff_members")
+}
+
+model StaffService {
+  staffMemberId String
+  serviceId     String
+  customPrice   Decimal?
+  customDuration Int?
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+  service     Service     @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@id([staffMemberId, serviceId])
+  @@map("staff_services")
+}
+
+model StaffSchedule {
+  id            String  @id @default(cuid())
+  staffMemberId String
+  dayOfWeek     Int
+  startTime     String
+  endTime       String
+  isAvailable   Boolean @default(true)
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([staffMemberId, dayOfWeek])
+  @@map("staff_schedules")
+}
+
+model StaffScheduleOverride {
+  id            String   @id @default(cuid())
+  staffMemberId String
+  date          DateTime
+  startTime     String?
+  endTime       String?
+  isAvailable   Boolean  @default(false)
+  reason        String?
+
+  staffMember StaffMember @relation(fields: [staffMemberId], references: [id], onDelete: Cascade)
+
+  @@unique([staffMemberId, date])
+  @@map("staff_schedule_overrides")
+}
+
+// ============================================================
+// APPOINTMENTS
+// ============================================================
+
+enum AppointmentStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+  NO_SHOW
+}
+
+enum AppointmentSource {
+  BOOKING_PAGE
+  SMS
+  WHATSAPP
+  EMAIL_REPLY
+  AI_CHAT
+  MANUAL
+  WIDGET
+}
+
+enum PaymentStatus {
+  UNPAID
+  PAID
+  REFUNDED
+}
+
+model Appointment {
+  id              String   @id @default(cuid())
+  organizationId  String
+  clientId        String
+  serviceId       String
+  staffMemberId   String
+  startTime       DateTime
+  endTime         DateTime
+  status          AppointmentStatus @default(CONFIRMED)
+  notes           String?
+  internalNotes   String?
+  source          AppointmentSource @default(MANUAL)
+  paymentStatus   PaymentStatus     @default(UNPAID)
+  cancellationReason String?
+  reminderSent    Boolean  @default(false)
+  followUpSent    Boolean  @default(false)
+  externalCalendarId String?
+  depositPaid     Boolean  @default(false)
+  depositAmount   Decimal?
+  locationId      String?
+  noShowRisk      Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization      Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client            Client             @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service           Service            @relation(fields: [serviceId], references: [id])
+  staffMember       StaffMember        @relation(fields: [staffMemberId], references: [id])
+  communicationLogs CommunicationLog[]
+  payments          Payment[]
+  aiConversation    AiConversation?    @relation(fields: [aiConversationId], references: [id])
+  aiConversationId  String?
+  recurrenceRule    RecurrenceRule?    @relation(fields: [recurrenceRuleId], references: [id])
+  recurrenceRuleId  String?
+  review            Review?
+  intakeFormSubmissions IntakeFormSubmission[]
+  location          Location?          @relation(fields: [locationId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, startTime])
+  @@index([staffMemberId, startTime])
+  @@index([clientId])
+  @@map("appointments")
+}
+
+// ============================================================
+// COMMUNICATIONS
+// ============================================================
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageType {
+  CONFIRMATION
+  REMINDER
+  FOLLOW_UP
+  CANCELLATION
+  AI_REPLY
+  PROMO
+  MANUAL
+}
+
+enum DeliveryStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+  READ
+}
+
+model CommunicationLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  clientId       String?
+  appointmentId  String?
+  channel        ContactChannel
+  direction      MessageDirection
+  messageType    MessageType
+  subject        String?
+  content        String
+  status         DeliveryStatus @default(QUEUED)
+  externalId     String?
+  inReplyTo      String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?      @relation(fields: [clientId], references: [id])
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([appointmentId])
+  @@map("communication_logs")
+}
+
+model MessageTemplate {
+  id             String  @id @default(cuid())
+  organizationId String
+  name           String
+  channel        ContactChannel
+  trigger        String
+  subject        String?
+  body           String
+  variables      String  @default("[]")
+  isActive       Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("message_templates")
+}
+
+// ============================================================
+// AI CONVERSATIONS
+// ============================================================
+
+enum ConversationStatus {
+  ACTIVE
+  RESOLVED
+  ESCALATED
+  PAUSED
+}
+
+model AiConversation {
+  id             String   @id @default(cuid())
+  organizationId String
+  clientId       String?
+  channel        ContactChannel
+  messages       String   @default("[]")
+  status         ConversationStatus @default(ACTIVE)
+  aiEnabled      Boolean  @default(true)
+  escalationReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client?       @relation(fields: [clientId], references: [id])
+  appointments Appointment[]
+  actionLogs   AiActionLog[]
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@map("ai_conversations")
+}
+
+// ============================================================
+// AI ACTION LOG (audit trail)
+// ============================================================
+
+enum AiActionType {
+  APPOINTMENT_CREATED
+  APPOINTMENT_CANCELLED
+  APPOINTMENT_RESCHEDULED
+  APPOINTMENT_CONFIRMED
+  CLIENT_CREATED
+  ESCALATED_TO_HUMAN
+  MESSAGE_SENT
+  SERVICE_CREATED
+  TIME_BLOCKED
+  SEARCH_PERFORMED
+  PACKAGE_ASSIGNED
+}
+
+model AiActionLog {
+  id             String   @id @default(cuid())
+  organizationId String
+  conversationId String?
+  actionType     AiActionType
+  description    String
+  metadata       String   @default("{}")
+  confidence     Float?
+
+  createdAt DateTime @default(now())
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversation   AiConversation? @relation(fields: [conversationId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, createdAt])
+  @@map("ai_action_logs")
+}
+
+// ============================================================
+// WAITLIST
+// ============================================================
+
+enum WaitlistStatus {
+  WAITING
+  NOTIFIED
+  BOOKED
+  EXPIRED
+}
+
+model WaitlistEntry {
+  id             String   @id @default(cuid())
+  organizationId String
+  clientId       String
+  serviceId      String
+  staffMemberId  String?
+  preferredDate  DateTime
+  preferredTimeStart String?
+  preferredTimeEnd   String?
+  status              WaitlistStatus @default(WAITING)
+  notifiedAt          DateTime?
+  autoBook            Boolean  @default(false)
+  notificationExpiry  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id])
+  service      Service      @relation(fields: [serviceId], references: [id])
+  staffMember  StaffMember? @relation(fields: [staffMemberId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, serviceId, status])
+  @@map("waitlist_entries")
+}
+
+// ============================================================
+// REVIEWS
+// ============================================================
+
+model Review {
+  id             String   @id @default(cuid())
+  organizationId String
+  clientId       String
+  appointmentId  String   @unique
+  rating         Int
+  comment        String?
+  isPublic       Boolean  @default(true)
+  ownerReply     String?
+  ownerRepliedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id])
+  appointment  Appointment  @relation(fields: [appointmentId], references: [id])
+
+  @@index([organizationId])
+  @@index([organizationId, rating])
+  @@map("reviews")
+}
+
+// ============================================================
+// PAYMENTS
+// ============================================================
+
+model Payment {
+  id              String  @id @default(cuid())
+  organizationId  String
+  appointmentId   String?
+  clientId        String
+  amount          Decimal
+  currency        String  @default("USD")
+  platformFee     Decimal @default(0)
+  netAmount       Decimal
+  status          String  @default("pending")
+  stripePaymentIntentId String? @unique
+  paymentMethod   String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+  client       Client       @relation(fields: [clientId], references: [id])
+
+  @@index([organizationId])
+  @@map("payments")
+}
+
+// ============================================================
+// BOOKING PAGES
+// ============================================================
+
+model BookingPage {
+  id              String  @id @default(cuid())
+  organizationId  String  @unique
+  slug            String  @unique
+  title           String
+  description     String?
+  logoUrl         String?
+  coverImageUrl   String?
+  theme           String  @default("{}")
+  showStaffSelection Boolean @default(true)
+  showPrices      Boolean @default(true)
+  requirePayment  Boolean @default(false)
+  customFields    String  @default("[]")
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("booking_pages")
+}
+
+// ============================================================
+// SUBSCRIPTIONS (platform billing)
+// ============================================================
+
+enum PricingModel {
+  SUBSCRIPTION
+  REVENUE_SHARE
+  HYBRID
+}
+
+enum SubscriptionTier {
+  FREE
+  PRO
+  BUSINESS
+}
+
+model Subscription {
+  id                  String   @id @default(cuid())
+  organizationId      String   @unique
+  pricingModel        PricingModel     @default(REVENUE_SHARE)
+  tier                SubscriptionTier @default(FREE)
+  stripeSubscriptionId String?  @unique
+  status              String   @default("active")
+  currentPeriodStart  DateTime?
+  currentPeriodEnd    DateTime?
+  staffCount          Int      @default(1)
+  revenueSharePct     Decimal  @default(4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("subscriptions")
+}
+
+// ============================================================
+// IMPORT JOBS (data migration)
+// ============================================================
+
+enum ImportJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ImportJobType {
+  CLIENTS
+  SERVICES
+  APPOINTMENTS
+}
+
+model ImportJob {
+  id             String          @id @default(cuid())
+  organizationId String
+  type           ImportJobType
+  status         ImportJobStatus @default(PENDING)
+  fileName       String
+  totalRows      Int             @default(0)
+  processedRows  Int             @default(0)
+  errorRows      Int             @default(0)
+  errors         String          @default("[]")
+  mappings       String          @default("{}")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("import_jobs")
+}
+
+// ============================================================
+// RECURRING APPOINTMENTS
+// ============================================================
+
+enum RecurrenceFrequency {
+  WEEKLY
+  BIWEEKLY
+  MONTHLY
+  CUSTOM
+}
+
+model RecurrenceRule {
+  id              String              @id @default(cuid())
+  organizationId  String
+  clientId        String
+  serviceId       String
+  staffMemberId   String
+  frequency       RecurrenceFrequency
+  intervalWeeks   Int                 @default(1)
+  dayOfWeek       Int?
+  dayOfMonth      Int?
+  preferredTime   String
+  startDate       DateTime
+  endDate         DateTime?
+  maxOccurrences  Int?
+  isActive        Boolean             @default(true)
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  service      Service      @relation(fields: [serviceId], references: [id])
+  staffMember  StaffMember  @relation(fields: [staffMemberId], references: [id])
+  appointments Appointment[]
+
+  @@index([organizationId])
+  @@index([organizationId, isActive])
+  @@map("recurrence_rules")
+}
+
+// ============================================================
+// PACKAGES & MEMBERSHIPS
+// ============================================================
+
+enum PackageType {
+  VISIT_PACK
+  MEMBERSHIP
+}
+
+enum ClientPackageStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  PAUSED
+}
+
+model Package {
+  id              String      @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  type            PackageType
+  price           Decimal
+  currency        String      @default("USD")
+  totalVisits     Int?
+  validDays       Int?
+  billingInterval String?
+  includedVisits  Int?
+  serviceIds      String      @default("[]")
+  isActive        Boolean     @default(true)
+  stripePriceId   String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  clientPackages ClientPackage[]
+
+  @@index([organizationId])
+  @@map("packages")
+}
+
+model ClientPackage {
+  id                   String              @id @default(cuid())
+  organizationId       String
+  clientId             String
+  packageId            String
+  status               ClientPackageStatus @default(ACTIVE)
+  visitsUsed           Int                 @default(0)
+  visitsTotal          Int?
+  startDate            DateTime            @default(now())
+  expiryDate           DateTime?
+  stripeSubscriptionId String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  package      Package      @relation(fields: [packageId], references: [id])
+
+  @@index([organizationId])
+  @@index([clientId, status])
+  @@map("client_packages")
+}
+
+// ============================================================
+// INTAKE FORMS & DIGITAL WAIVERS
+// ============================================================
+
+model IntakeForm {
+  id               String  @id @default(cuid())
+  organizationId   String
+  name             String
+  description      String?
+  fields           String  @default("[]")
+  requireSignature Boolean @default(false)
+  isActive         Boolean @default(true)
+  sortOrder        Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  serviceLinks IntakeFormServiceLink[]
+  submissions  IntakeFormSubmission[]
+
+  @@index([organizationId])
+  @@map("intake_forms")
+}
+
+model IntakeFormServiceLink {
+  id           String @id @default(cuid())
+  intakeFormId String
+  serviceId    String
+
+  intakeForm IntakeForm @relation(fields: [intakeFormId], references: [id], onDelete: Cascade)
+  service    Service    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@unique([intakeFormId, serviceId])
+  @@map("intake_form_service_links")
+}
+
+model IntakeFormSubmission {
+  id            String   @id @default(cuid())
+  organizationId String
+  intakeFormId  String
+  clientId      String
+  appointmentId String?
+  responses     String   @default("{}")
+  signatureData String?
+  signedAt      DateTime?
+  submittedAt   DateTime @default(now())
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  intakeForm   IntakeForm   @relation(fields: [intakeFormId], references: [id], onDelete: Cascade)
+  client       Client       @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  appointment  Appointment? @relation(fields: [appointmentId], references: [id])
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([appointmentId])
+  @@map("intake_form_submissions")
+}
+
+// ============================================================
+// GOOGLE CALENDAR SYNC
+// ============================================================
+
+enum CalendarSyncDirection {
+  ONE_WAY_PUSH
+  ONE_WAY_PULL
+  TWO_WAY
+}
+
+model CalendarSync {
+  id              String  @id @default(cuid())
+  organizationId  String
+  userId          String
+  staffMemberId   String?
+  provider        String  @default("google")
+  accessToken     String
+  refreshToken    String
+  tokenExpiry     DateTime
+  calendarId      String  @default("primary")
+  syncToken       String?
+  syncDirection   CalendarSyncDirection @default(TWO_WAY)
+  lastSyncAt      DateTime?
+  isActive        Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  staffMember  StaffMember? @relation(fields: [staffMemberId], references: [id])
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@map("calendar_syncs")
+}
+
+// ============================================================
+// MARKETING CAMPAIGNS
+// ============================================================
+
+enum CampaignType {
+  BIRTHDAY
+  WINBACK
+  POST_VISIT
+  REBOOK_NUDGE
+  CUSTOM
+}
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id              String         @id @default(cuid())
+  organizationId  String
+  name            String
+  type            CampaignType
+  status          CampaignStatus @default(DRAFT)
+  channel         ContactChannel @default(EMAIL)
+  triggerConfig   String         @default("{}")
+  messageTemplate String?
+  useAi           Boolean        @default(true)
+  lastRunAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  executions   CampaignExecution[]
+
+  @@index([organizationId])
+  @@index([status])
+  @@map("campaigns")
+}
+
+enum CampaignExecutionStatus {
+  PENDING
+  SENT
+  FAILED
+  SKIPPED
+}
+
+model CampaignExecution {
+  id          String                  @id @default(cuid())
+  campaignId  String
+  clientId    String
+  status      CampaignExecutionStatus @default(PENDING)
+  message     String?
+  sentAt      DateTime?
+  error       String?
+
+  createdAt DateTime @default(now())
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  client   Client   @relation(fields: [clientId], references: [id])
+
+  @@index([campaignId])
+  @@index([clientId])
+  @@map("campaign_executions")
+}
